@@ -55,19 +55,43 @@ typedef struct {
    sem_t sema;
    ILCLIENT_T *client;
    COMPONENT_T *audio_render;
+   COMPONENT_T *mp3_decoder;
    COMPONENT_T *list[2];
    OMX_BUFFERHEADERTYPE *user_buffer_list; // buffers owned by the client
-   uint32_t num_buffers;
-   uint32_t bytes_per_sample;
+   uint32_t pcm_num_buffers;
+   uint32_t mp3_in_num_buffers;
+   uint32_t mp3_out_num_buffers;
+   uint32_t pcm_bytes_per_sample;
 } AUDIOPLAY_STATE_T;
 
 static void input_buffer_callback(void *data, COMPONENT_T *comp)
 {
    // do nothing - could add a callback to the user
    // to indicate more buffers may be available.
+   printf("input_buffer_callback\n");
 }
 
-int32_t audioplay_create(AUDIOPLAY_STATE_T **handle,
+static void error_callback(void *data, COMPONENT_T *comp, OMX_U32 d)
+{
+   printf("error callback, code=%d (0x%x)\n", d, d);
+}
+
+static void port_settings_callback(void *data, COMPONENT_T *comp, OMX_U32 d)
+{
+   printf("port settings callback\n");
+}
+
+static void config_changed_callback(void *data, COMPONENT_T *comp, OMX_U32 d)
+{
+   printf("config changed callback\n");
+}
+
+
+
+
+
+
+int32_t pcm_audioplay_create(AUDIOPLAY_STATE_T **handle,
                          uint32_t sample_rate,
                          uint32_t num_channels,
                          uint32_t bit_depth,
@@ -107,8 +131,8 @@ int32_t audioplay_create(AUDIOPLAY_STATE_T **handle,
          s = sem_init(&st->sema, 0, 1);
          assert(s == 0);
 
-         st->bytes_per_sample = bytes_per_sample;
-         st->num_buffers = num_buffers;
+         st->pcm_bytes_per_sample = bytes_per_sample;
+         st->pcm_num_buffers = num_buffers;
 
          st->client = ilclient_init();
          assert(st->client != NULL);
@@ -205,6 +229,128 @@ int32_t audioplay_create(AUDIOPLAY_STATE_T **handle,
    return ret;
 }
 
+int32_t mp3_audioplay_create(AUDIOPLAY_STATE_T *st,
+                         uint32_t in_num_buffers,
+                         uint32_t in_buffer_size,
+                         uint32_t out_num_buffers,
+                         uint32_t out_buffer_size
+                         )
+{
+   int32_t ret = -1;
+
+   // basic sanity check on arguments
+   if(in_num_buffers==0 || in_buffer_size==0 || out_num_buffers==0 || out_buffer_size==0 || st==NULL)
+      return -1;
+      
+   // buffer lengths must be 16 byte aligned for VCHI
+   int in_size = (in_buffer_size + 15) & ~15;
+   int out_size = (out_buffer_size + 15) & ~15;
+   
+
+   OMX_ERRORTYPE error;
+   OMX_PARAM_PORTDEFINITIONTYPE param;
+   OMX_AUDIO_PARAM_MP3TYPE mp3;
+
+   ret = 0;
+
+// INPUT PORT
+         // create and start up everything
+///         s = sem_init(&st->sema, 0, 1);
+///         assert(s == 0);
+
+         st->mp3_in_num_buffers = in_num_buffers;
+
+///         st->client = ilclient_init();
+///         assert(st->client != NULL);
+
+///         ilclient_set_empty_buffer_done_callback(st->client, input_buffer_callback, st);
+
+///         error = OMX_Init();
+///         assert(error == OMX_ErrorNone);
+
+ilclient_set_port_settings_callback(st->client, port_settings_callback, st);
+ilclient_set_error_callback(st->client, error_callback, st);
+ilclient_set_configchanged_callback(st->client, config_changed_callback, st);
+
+         ilclient_create_component(st->client, &st->mp3_decoder, "audio_decode", 
+            ILCLIENT_ENABLE_INPUT_BUFFERS | ILCLIENT_ENABLE_OUTPUT_BUFFERS | ILCLIENT_DISABLE_ALL_PORTS);
+         assert(st->mp3_decoder != NULL);
+
+         st->list[1] = st->mp3_decoder;
+
+// INPUT PORT PARAMS
+
+         // set up the number/size of buffers
+         memset(&param, 0, sizeof(OMX_PARAM_PORTDEFINITIONTYPE));
+         param.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
+         param.nVersion.nVersion = OMX_VERSION;
+         param.nPortIndex = 120;
+
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+         param.nBufferSize = in_size;
+         param.nBufferCountActual = in_num_buffers;
+
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+         // set the mp3 parameters
+         
+         memset(&mp3, 0, sizeof(OMX_AUDIO_PARAM_PCMMODETYPE));
+         mp3.nSize = sizeof(OMX_AUDIO_PARAM_PCMMODETYPE);
+         mp3.nVersion.nVersion = OMX_VERSION;
+         mp3.nPortIndex = 120;
+         mp3.nChannels = 2;
+         mp3.nBitRate=0;              // Bit rate of the input data.  Use 0 for variable rate or unknown bit rates
+         mp3.nSampleRate=0;           // Sampling rate of the source data.  Use 0 for variable or unknown sampling rate.
+         mp3.nAudioBandWidth=0;       // Audio band width (in Hz) to which an encoder should limit the audio signal. Use 0 to let encoder decide
+         mp3.eChannelMode=OMX_AUDIO_ChannelModeStereo;   // Channel mode enumeration 
+         mp3.eFormat=OMX_AUDIO_MP3StreamFormatMP1Layer3;  // MP3 stream format 
+
+         
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamAudioMp3, &mp3);
+         assert(error == OMX_ErrorNone);
+         
+// OUTPUT PORT PARAMS
+
+         // set up the number/size of buffers
+         memset(&param, 0, sizeof(OMX_PARAM_PORTDEFINITIONTYPE));
+         param.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
+         param.nVersion.nVersion = OMX_VERSION;
+         param.nPortIndex = 121;
+
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+         param.nBufferSize = out_size;
+         param.nBufferCountActual = out_num_buffers;
+
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+// CHANGE STATE
+
+
+         error = ilclient_change_component_state(st->mp3_decoder, OMX_StateIdle);
+	 assert(error == 0);
+
+	 error = ilclient_enable_port_buffers(st->mp3_decoder, 121, NULL, NULL, NULL);
+	 assert(error == 0);
+
+
+	 error = ilclient_enable_port_buffers(st->mp3_decoder, 120, NULL, NULL, NULL);
+	 assert(error == 0);
+
+
+         
+         ilclient_change_component_state(st->mp3_decoder, OMX_StateExecuting);
+      
+   
+
+   return ret;
+}
+
 int32_t audioplay_delete(AUDIOPLAY_STATE_T *st)
 {
    OMX_ERRORTYPE error;
@@ -256,7 +402,7 @@ int32_t audioplay_play_buffer(AUDIOPLAY_STATE_T *st,
    OMX_BUFFERHEADERTYPE *hdr = NULL, *prev = NULL;
    int32_t ret = -1;
 
-   if(length % st->bytes_per_sample)
+   if(length % st->pcm_bytes_per_sample)
       return ret;
 
    sem_wait(&st->sema);
@@ -353,8 +499,12 @@ void play_api_test(int samplerate, int bitdepth, int nchannels, int dest)
 
    assert(dest == 0 || dest == 1);
 
-   ret = audioplay_create(&st, samplerate, nchannels, bitdepth, 10, buffer_size);
+   ret = pcm_audioplay_create(&st, samplerate, nchannels, bitdepth, 10, buffer_size);
    assert(ret == 0);
+
+   ret = mp3_audioplay_create(st, 10, buffer_size, 10, buffer_size);
+   assert(ret == 0);
+
 
    ret = audioplay_set_dest(st, audio_dest[dest]);
    assert(ret == 0);
