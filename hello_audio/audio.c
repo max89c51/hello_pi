@@ -55,7 +55,7 @@ typedef struct {
    sem_t sema;
    ILCLIENT_T *client;
    COMPONENT_T *audio_render;
-   COMPONENT_T *mp3_decoder;
+   COMPONENT_T *audio_decode;
    COMPONENT_T *list[2];
    OMX_BUFFERHEADERTYPE *user_buffer_list; // buffers owned by the client
    uint32_t pcm_num_buffers;
@@ -249,7 +249,7 @@ int32_t mp3_audioplay_create(AUDIOPLAY_STATE_T *st,
 
    OMX_ERRORTYPE error;
    OMX_PARAM_PORTDEFINITIONTYPE param;
-   OMX_AUDIO_PARAM_MP3TYPE mp3;
+   
 
    ret = 0;
 
@@ -272,36 +272,44 @@ ilclient_set_port_settings_callback(st->client, port_settings_callback, st);
 ilclient_set_error_callback(st->client, error_callback, st);
 ilclient_set_configchanged_callback(st->client, config_changed_callback, st);
 
-         ilclient_create_component(st->client, &st->mp3_decoder, "audio_decode", 
+         ilclient_create_component(st->client, &st->audio_decode, "audio_decode", 
             ILCLIENT_ENABLE_INPUT_BUFFERS | ILCLIENT_ENABLE_OUTPUT_BUFFERS | ILCLIENT_DISABLE_ALL_PORTS);
-         assert(st->mp3_decoder != NULL);
+         assert(st->audio_decode != NULL);
 
-         st->list[1] = st->mp3_decoder;
+         st->list[1] = st->audio_decode;
 
 // INPUT PORT PARAMS
 
+/*
+         OMX_AUDIO_PARAM_MP3TYPE mp3;
          // set up the number/size of buffers
          memset(&param, 0, sizeof(OMX_PARAM_PORTDEFINITIONTYPE));
          param.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
          param.nVersion.nVersion = OMX_VERSION;
          param.nPortIndex = 120;
 
-         error = OMX_GetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
          assert(error == OMX_ErrorNone);
 
          param.nBufferSize = in_size;
          param.nBufferCountActual = in_num_buffers;
+         param.format.audio.cMIMEType="audio/mpeg";
+         param.format.audio.eEncoding = OMX_AUDIO_CodingMP3;
 
-         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
          assert(error == OMX_ErrorNone);
 
          // set the mp3 parameters
          
-         memset(&mp3, 0, sizeof(OMX_AUDIO_PARAM_PCMMODETYPE));
-         mp3.nSize = sizeof(OMX_AUDIO_PARAM_PCMMODETYPE);
+         memset(&mp3, 0, sizeof(OMX_AUDIO_PARAM_MP3TYPE));
+         mp3.nSize = sizeof(OMX_AUDIO_PARAM_MP3TYPE);
          mp3.nVersion.nVersion = OMX_VERSION;
          mp3.nPortIndex = 120;
-         mp3.nChannels = 2;
+
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamAudioMp3, &mp3);
+         assert(error == OMX_ErrorNone);
+
+         mp3.nChannels = 0;
          mp3.nBitRate=0;              // Bit rate of the input data.  Use 0 for variable rate or unknown bit rates
          mp3.nSampleRate=0;           // Sampling rate of the source data.  Use 0 for variable or unknown sampling rate.
          mp3.nAudioBandWidth=0;       // Audio band width (in Hz) to which an encoder should limit the audio signal. Use 0 to let encoder decide
@@ -309,9 +317,62 @@ ilclient_set_configchanged_callback(st->client, config_changed_callback, st);
          mp3.eFormat=OMX_AUDIO_MP3StreamFormatMP1Layer3;  // MP3 stream format 
 
          
-         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamAudioMp3, &mp3);
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamAudioMp3, &mp3);
          assert(error == OMX_ErrorNone);
+ */ 
+ 
+         OMX_AUDIO_PARAM_VORBISTYPE vorbis;
+         // set up the number/size of buffers
+         memset(&param, 0, sizeof(OMX_PARAM_PORTDEFINITIONTYPE));
+         param.nSize = sizeof(OMX_PARAM_PORTDEFINITIONTYPE);
+         param.nVersion.nVersion = OMX_VERSION;
+         param.nPortIndex = 120;
+
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+         param.nBufferSize = in_size;
+         param.nBufferCountActual = in_num_buffers;
+         param.format.audio.cMIMEType="audio/vorbis";
+         param.format.audio.eEncoding = OMX_AUDIO_CodingVORBIS;
+
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
+         assert(error == OMX_ErrorNone);
+
+         // set the vorbis parameters         
+         memset(&vorbis, 0, sizeof(OMX_AUDIO_PARAM_VORBISTYPE));
+         vorbis.nSize = sizeof(OMX_AUDIO_PARAM_VORBISTYPE);
+         vorbis.nVersion.nVersion = OMX_VERSION;
+         vorbis.nPortIndex = 120;
+
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamAudioVorbis, &vorbis);
+         assert(error == OMX_ErrorNone);
+
+         vorbis.nChannels=0;        /// Number of channels 
+         vorbis.nBitRate=0;         /// Bit rate of the encoded data data.  Use 0 for variable
+                                    /// rate or unknown bit rates. Encoding is set to the
+                                    /// bitrate closest to specified  value (in bps)
+         vorbis.nMinBitRate=0;      /// Sets minimum bitrate (in bps). 
+         vorbis.nMaxBitRate=0;      /// Sets maximum bitrate (in bps). 
+         vorbis.nSampleRate=0;      /// Sampling rate of the source data.  Use 0 for
+                                    /// variable or unknown sampling rate. 
+         vorbis.nAudioBandWidth=0;  /// Audio band width (in Hz) to which an encoder should
+                                    /// limit the audio signal. Use 0 to let encoder decide 
+         vorbis.nQuality=3;         /// Sets encoding quality to n, between -1 (low) and 10 (high).
+                                    /// In the default mode of operation, teh quality level is 3.
+                                    /// Normal quality range is 0 - 10. 
+         vorbis.bManaged=0;         /// Set  bitrate  management  mode. This turns off the
+                                    /// normal VBR encoding, but allows hard or soft bitrate
+                                    /// constraints to be enforced by the encoder. This mode can
+                                    /// be slower, and may also be lower quality. It is
+                                    /// primarily useful for streaming. 
+         vorbis.bDownmix=0;         /// Downmix input from stereo to mono (has no effect on 
+                                    /// non-stereo streams). Useful for lower-bitrate encoding. 
          
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamAudioVorbis, &vorbis);
+         assert(error == OMX_ErrorNone);
+ 
+       
 // OUTPUT PORT PARAMS
 
          // set up the number/size of buffers
@@ -320,31 +381,32 @@ ilclient_set_configchanged_callback(st->client, config_changed_callback, st);
          param.nVersion.nVersion = OMX_VERSION;
          param.nPortIndex = 121;
 
-         error = OMX_GetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         error = OMX_GetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
          assert(error == OMX_ErrorNone);
 
          param.nBufferSize = out_size;
          param.nBufferCountActual = out_num_buffers;
 
-         error = OMX_SetParameter(ILC_GET_HANDLE(st->mp3_decoder), OMX_IndexParamPortDefinition, &param);
+         error = OMX_SetParameter(ILC_GET_HANDLE(st->audio_decode), OMX_IndexParamPortDefinition, &param);
          assert(error == OMX_ErrorNone);
 
 // CHANGE STATE
 
 
-         error = ilclient_change_component_state(st->mp3_decoder, OMX_StateIdle);
+         error = ilclient_change_component_state(st->audio_decode, OMX_StateIdle);
 	 assert(error == 0);
 
-	 error = ilclient_enable_port_buffers(st->mp3_decoder, 121, NULL, NULL, NULL);
+	 error = ilclient_enable_port_buffers(st->audio_decode, 120, NULL, NULL, NULL);
 	 assert(error == 0);
 
 
-	 error = ilclient_enable_port_buffers(st->mp3_decoder, 120, NULL, NULL, NULL);
+	 error = ilclient_enable_port_buffers(st->audio_decode, 121, NULL, NULL, NULL);
 	 assert(error == 0);
+
 
 
          
-         ilclient_change_component_state(st->mp3_decoder, OMX_StateExecuting);
+         ilclient_change_component_state(st->audio_decode, OMX_StateExecuting);
       
    
 
